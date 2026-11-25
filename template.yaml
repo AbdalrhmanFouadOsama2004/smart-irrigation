@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Smart irrigation monitor
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email address that receives farm alerts
+
+Resources:
+  ReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: field_id, AttributeType: S }
+        - { AttributeName: timestamp, AttributeType: S }
+      KeySchema:
+        - { AttributeName: field_id, KeyType: HASH }
+        - { AttributeName: timestamp, KeyType: RANGE }
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  ProcessReading:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.handler
+      Runtime: python3.13
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ReadingsTable
+          TOPIC_ARN: !Ref AlertTopic
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReadingsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+      Events:
+        SensorData:
+          Type: IoTRule
+          Properties:
+            Sql: "SELECT *, topic(2) AS field_id FROM 'farm/+/readings'"
+            AwsIotSqlVersion: "2016-03-23"
+
+Outputs:
+  TableName:
+    Value: !Ref ReadingsTable
